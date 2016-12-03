@@ -73,7 +73,9 @@ typedef enum {
 typedef enum {
 	DYNAMIC_TYPE,
 	STRICT_TYPE,
-	RANDOM_TYPE}
+	RANDOM_TYPE,
+	ROTATE_TYPE
+}
 chain_type;
 
 typedef enum {
@@ -100,10 +102,11 @@ typedef struct {
 	proxy_state ps;
 	char user[256];
 	char pass[256];
+	// TODO: add down_at attribute, then we can check its status x minutes later
 } proxy_data;
 
 int connect_proxy_chain (int, ip_type, unsigned short, proxy_data *, unsigned int,
-    chain_type, unsigned int);
+    chain_type, unsigned int, unsigned int *);
 
 void proxychains_write_log(char *, ...);
 

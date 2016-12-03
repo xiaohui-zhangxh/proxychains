@@ -56,6 +56,7 @@ int tcp_connect_time_out;
 int proxychains_got_chain_data = 0;
 int proxychains_quiet_mode = 0;
 int proxychains_resolver = 0;
+unsigned int current_proxy_offset = 0;
 
 unsigned int proxychains_proxy_count = 0;
 unsigned int proxychains_max_chain = 1;
@@ -231,6 +232,8 @@ static void get_chain_data(proxy_data * pd, unsigned int *proxy_count, chain_typ
 					list = 1;
 				} else if(strstr(buff, "random_chain")) {
 					*ct = RANDOM_TYPE;
+				} else if(strstr(buff, "rotate_chain")) {
+					*ct = ROTATE_TYPE;
 				} else if(strstr(buff, "strict_chain")) {
 					*ct = STRICT_TYPE;
 				} else if(strstr(buff, "dynamic_chain")) {
@@ -382,12 +385,13 @@ int connect(int sock, const struct sockaddr *addr, socklen_t len) {
 		fcntl(sock, F_SETFL, !O_NONBLOCK);
 
 	dest_ip.as_int = SOCKADDR(*addr);
-
+	// printf("current_proxy_offset: %d\n", current_proxy_offset);
 	ret = connect_proxy_chain(sock,
 				  dest_ip,
 				  SOCKPORT(*addr),
-				  proxychains_pd, proxychains_proxy_count, proxychains_ct, proxychains_max_chain);
-
+				  proxychains_pd, proxychains_proxy_count, proxychains_ct, proxychains_max_chain, &current_proxy_offset);
+	current_proxy_offset++;
+	if(current_proxy_offset >= proxychains_proxy_count) current_proxy_offset = 0;
 	fcntl(sock, F_SETFL, flags);
 	if(ret != SUCCESS)
 		errno = ECONNREFUSED;

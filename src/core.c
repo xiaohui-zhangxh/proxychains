@@ -483,6 +483,7 @@ static int tunnel_to(int sock, ip_type ip, unsigned short port, proxy_type pt, c
 #define DT "Dynamic chain"
 #define ST "Strict chain"
 #define RT "Random chain"
+#define RTT "Rotate chain"
 
 static int start_chain(int *fd, proxy_data * pd, char *begin_mark) {
 	struct sockaddr_in addr;
@@ -607,11 +608,11 @@ static int chain_step(int ns, proxy_data * pfrom, proxy_data * pto) {
 
 int connect_proxy_chain(int sock, ip_type target_ip,
 			unsigned short target_port, proxy_data * pd,
-			unsigned int proxy_count, chain_type ct, unsigned int max_chain) {
+			unsigned int proxy_count, chain_type ct, unsigned int max_chain, unsigned int *offset) {
 	proxy_data p4;
 	proxy_data *p1, *p2, *p3;
 	int ns = -1;
-	unsigned int offset = 0;
+	// unsigned int offset = 0;
 	unsigned int alive_count = 0;
 	unsigned int curr_len = 0;
 
@@ -624,13 +625,13 @@ int connect_proxy_chain(int sock, ip_type target_ip,
 	switch (ct) {
 		case DYNAMIC_TYPE:
 			calc_alive(pd, proxy_count);
-			offset = 0;
+			*offset = 0;
 			do {
-				if(!(p1 = select_proxy(FIFOLY, pd, proxy_count, &offset)))
+				if(!(p1 = select_proxy(FIFOLY, pd, proxy_count, offset)))
 					goto error_more;
-			} while(SUCCESS != start_chain(&ns, p1, DT) && offset < proxy_count);
+			} while(SUCCESS != start_chain(&ns, p1, DT) && *offset < proxy_count);
 			for(;;) {
-				p2 = select_proxy(FIFOLY, pd, proxy_count, &offset);
+				p2 = select_proxy(FIFOLY, pd, proxy_count, offset);
 				if(!p2)
 					break;
 				if(SUCCESS != chain_step(ns, p1, p2)) {
@@ -648,8 +649,8 @@ int connect_proxy_chain(int sock, ip_type target_ip,
 
 		case STRICT_TYPE:
 			calc_alive(pd, proxy_count);
-			offset = 0;
-			if(!(p1 = select_proxy(FIFOLY, pd, proxy_count, &offset))) {
+			*offset = 0;
+			if(!(p1 = select_proxy(FIFOLY, pd, proxy_count, offset))) {
 				PDEBUG("select_proxy failed\n");
 				goto error_strict;
 			}
@@ -657,8 +658,8 @@ int connect_proxy_chain(int sock, ip_type target_ip,
 				PDEBUG("start_chain failed\n");
 				goto error_strict;
 			}
-			while(offset < proxy_count) {
-				if(!(p2 = select_proxy(FIFOLY, pd, proxy_count, &offset)))
+			while(*offset < proxy_count) {
+				if(!(p2 = select_proxy(FIFOLY, pd, proxy_count, offset)))
 					break;
 				if(SUCCESS != chain_step(ns, p1, p2)) {
 					PDEBUG("chain_step failed\n");
@@ -677,13 +678,13 @@ int connect_proxy_chain(int sock, ip_type target_ip,
 			alive_count = calc_alive(pd, proxy_count);
 			if(alive_count < max_chain)
 				goto error_more;
-			curr_len = offset = 0;
+			curr_len = *offset = 0;
 			do {
-				if(!(p1 = select_proxy(RANDOMLY, pd, proxy_count, &offset)))
+				if(!(p1 = select_proxy(RANDOMLY, pd, proxy_count, offset)))
 					goto error_more;
-			} while(SUCCESS != start_chain(&ns, p1, RT) && offset < max_chain);
+			} while(SUCCESS != start_chain(&ns, p1, RT) && *offset < max_chain);
 			while(++curr_len < max_chain) {
-				if(!(p2 = select_proxy(RANDOMLY, pd, proxy_count, &offset)))
+				if(!(p2 = select_proxy(RANDOMLY, pd, proxy_count, offset)))
 					goto error_more;
 				if(SUCCESS != chain_step(ns, p1, p2)) {
 					PDEBUG("GOTO AGAIN 2\n");
@@ -696,6 +697,27 @@ int connect_proxy_chain(int sock, ip_type target_ip,
 			p3->port = target_port;
 			if(SUCCESS != chain_step(ns, p1, p3))
 				goto error;
+			break;
+
+		case ROTATE_TYPE:
+			alive_count = calc_alive(pd, proxy_count);
+			// proxychains_write_log(LOG_PREFIX "alive_count = %d\n", alive_count);
+			unsigned int rotated = 0;
+			do {
+				if(!(p1 = select_proxy(FIFOLY, pd, proxy_count, offset))){
+					if(rotated == 0){
+						rotated = 1;
+						*offset = 0;
+					}else{
+				  	goto error_more;
+					}
+				}
+			} while(SUCCESS != start_chain(&ns, p1, RTT));
+			p3->ip = target_ip;
+			p3->port = target_port;
+			if(SUCCESS != chain_step(ns, p1, p3))
+				goto error;
+
 	}
 
 	proxychains_write_log(TP " OK\n");
