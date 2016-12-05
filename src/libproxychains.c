@@ -56,7 +56,14 @@ int tcp_connect_time_out;
 int proxychains_got_chain_data = 0;
 int proxychains_quiet_mode = 0;
 int proxychains_resolver = 0;
-unsigned int current_proxy_offset = 0;
+
+typedef struct {
+	unsigned int offset;
+	unsigned long time;
+	unsigned int interval;
+} rotate_state_t;
+
+rotate_state_t rotate_state = { 0, 0, 60 };
 
 unsigned int proxychains_proxy_count = 0;
 unsigned int proxychains_max_chain = 1;
@@ -300,6 +307,12 @@ static void get_chain_data(proxy_data * pd, unsigned int *proxy_count, chain_typ
 					proxychains_quiet_mode = 1;
 				} else if(strstr(buff, "proxy_dns")) {
 					proxychains_resolver = 1;
+				} else if(strstr(buff, "rotate_interval")){
+					char *pc;
+					int len;
+					pc = strchr(buff, '=');
+					len = atoi(++pc);
+					rotate_state.interval = (unsigned int) (len ? len : 60);
 				}
 			}
 		}
@@ -385,13 +398,18 @@ int connect(int sock, const struct sockaddr *addr, socklen_t len) {
 		fcntl(sock, F_SETFL, !O_NONBLOCK);
 
 	dest_ip.as_int = SOCKADDR(*addr);
-	// printf("current_proxy_offset: %d\n", current_proxy_offset);
+	// printf("before rotate_state.offset: %d\n", rotate_state.offset);
 	ret = connect_proxy_chain(sock,
 				  dest_ip,
 				  SOCKPORT(*addr),
-				  proxychains_pd, proxychains_proxy_count, proxychains_ct, proxychains_max_chain, &current_proxy_offset);
-	current_proxy_offset++;
-	if(current_proxy_offset >= proxychains_proxy_count) current_proxy_offset = 0;
+				  proxychains_pd, proxychains_proxy_count, proxychains_ct, proxychains_max_chain, &rotate_state.offset);
+	// printf("rotate_state.time: %lu, rotate_state.interval: %d, now: %lu\n", rotate_state.time, rotate_state.interval, time(NULL));
+	if(rotate_state.time + rotate_state.interval < time(NULL)){
+		rotate_state.time = time(NULL);
+		rotate_state.offset++;
+		if(rotate_state.offset >= proxychains_proxy_count) rotate_state.offset = 0;
+		// printf("Now - %lu set rotate_state.offset to %d\n", time(NULL), rotate_state.offset);
+	}
 	fcntl(sock, F_SETFL, flags);
 	if(ret != SUCCESS)
 		errno = ECONNREFUSED;
